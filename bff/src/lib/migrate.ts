@@ -998,6 +998,17 @@ CREATE TABLE IF NOT EXISTS source_page_rules (
   PRIMARY KEY (source_id, series_scope)
 );
 
+-- A source pack's declared settings, saved by the server because a pack has no engine and its files are mounted
+-- read-only (lib/sourceSettings.ts). Absent means "not set here": the pack falls back to its own environment/file
+-- configuration. The value column holds the JSON value, or the sealed text for a setting declared secret.
+CREATE TABLE IF NOT EXISTS source_settings (
+  source_id text NOT NULL,
+  key text NOT NULL,
+  value jsonb NOT NULL,
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (source_id, key)
+);
+
 -- Bulk import (backup / MangaDex list / pasted titles) → match review → add. Unlike importJob/artJob/
 -- relinkJob (in-memory singletons in admin.ts), this survives a restart on purpose: matching is a
 -- cross-source search pass that can run for minutes, and a human then has to look at every uncertain row,

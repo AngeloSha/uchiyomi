@@ -819,6 +819,14 @@ const WORDS: Record<string, (p: P) => string | null> = {
   'pref.text': (p) => tr('{label} takes text.', { label: str(p, 'label') }),
   'pref.tooLong': (p) => tr('{label} is too long.', { label: str(p, 'label') }),
 
+  // ---- A source pack's settings (routes/sourceSettings.ts): same refusals, no extension involved.
+  'setting.unknown': () => tr('This source has no such setting any more. Reopen its settings.'),
+  'setting.onOff': (p) => tr('{label} takes on or off.', { label: str(p, 'label') }),
+  'setting.noChoice': (p) => tr('{label} has no choice "{value}".', { label: str(p, 'label'), value: str(p, 'value') }),
+  'setting.choices': (p) => tr('{label} takes a list of its choices.', { label: str(p, 'label') }),
+  'setting.text': (p) => tr('{label} takes text.', { label: str(p, 'label') }),
+  'setting.tooLong': (p) => tr('{label} is too long.', { label: str(p, 'label') }),
+
   // ---- A follow refused for its language (v0.52.0, #123): the two languages by the reader's own names for them.
   'follow.languageDiffers': (p) => tr('That source is in {theirs} and this series is in {ours}. Add it as an edition in {theirs} instead: each language keeps its own chapters.', {
     theirs: languageName(str(p, 'theirs')), ours: languageName(str(p, 'ours')),

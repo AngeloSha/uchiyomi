@@ -41,6 +41,7 @@ import { Disclosure, Segmented } from '@/components/settings';
 import { AGE_CHOICES, ageChoice, ageRequest, ageWhy, type AgeChoice } from '@/lib/sourceAge';
 import { Busy, ExtIcon, ExtTags, Facts, busyKey } from '@/components/ExtensionBits';
 import { ExtensionRemove, ExtensionSection, ExtensionUpdateKey } from '@/components/ExtensionSheet';
+import { ExtensionSettingsBody } from '@/components/ExtensionSettings';
 import { MangadexLanguages, SiteLanguage } from '@/components/MangadexCard';
 import { IcChevronRight } from '@/components/icons';
 import type { ExtActions } from '@/components/ExtensionsPanel';
@@ -356,6 +357,15 @@ export function SourceSheet({ target, overview, evidence, testMs, status, action
             ) : (
               <p className="text-[12px] text-fog-500">{engineReady ? tr('This extension is no longer installed.') : tr('The extension engine isn’t answering')}</p>
             )}
+          </div>
+        )}
+
+        {/* A pack declares its own settings; the values live on the server (routes/sourceSettings.ts). */}
+        {s?.kind === 'pack' && s.settings && (
+          <div className="border-t border-ink-800/70 pt-1" data-source-settings>
+            <Disclosure label={tr('Settings')} defaultOpen>
+              <ExtensionSettingsBody sourceId={s.id} onSourceId={() => {}} kind="pack" note />
+            </Disclosure>
           </div>
         )}
       </div>

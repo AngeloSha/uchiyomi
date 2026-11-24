@@ -26,6 +26,12 @@ export interface SourcePref {
   dialogMessage?: string | null;
   /** Changing it changes the chapter numbers the source gives: the sheet warns before it is changed. */
   numbering: boolean;
+  /** A source pack setting stored sealed: the server answers `null` and `set`, never the value. */
+  secret?: boolean;
+  /** A value is stored for this key -- for a secret, the only way to know it is there. */
+  set?: boolean;
+  /** A stored value the server could not read; the sheet asks for it again. */
+  unreadable?: boolean;
 }
 
 export interface SourcePrefsAnswer {

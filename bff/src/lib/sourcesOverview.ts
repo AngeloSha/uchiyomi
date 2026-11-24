@@ -41,6 +41,8 @@ export interface OverviewSource {
   lang: string | null;
   /** Extension sources only: the package that provides it. */
   pkgName?: string | null;
+  /** A source pack that declares at least one setting: the sheet offers them. */
+  settings?: boolean;
   standing: Standing;
   offBy: 'admin' | 'extension' | 'language' | null;
   state: OverviewState;
@@ -187,6 +189,7 @@ export async function sourcesOverview(): Promise<SourcesOverview> {
       kind: kindOf(id),
       lang: lang?.trim() ? lang : null,
       ...(isSwAdapterId(id) ? { pkgName: ext?.pkg_name ?? null } : {}),
+      ...(src?.preferences?.length ? { settings: true } : {}),
       standing: st,
       offBy: st === 'off' ? offBy : null,
       state,

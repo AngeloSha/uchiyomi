@@ -21,7 +21,7 @@ const ALGO = 'aes-256-gcm';
  * A named purpose rather than a free salt string: `tokens.map(open)` would otherwise pass the array index
  * as the salt and fail every decrypt quietly. The type refuses that.
  */
-const SALTS = { tracker: 'uchiyomi.tracker.v1', notify: 'uchiyomi.notify.v1' } as const;
+const SALTS = { tracker: 'uchiyomi.tracker.v1', notify: 'uchiyomi.notify.v1', sourcepref: 'uchiyomi.sourcepref.v1' } as const;
 export type SecretPurpose = keyof typeof SALTS;
 const cached = new Map<SecretPurpose, Buffer>();
 

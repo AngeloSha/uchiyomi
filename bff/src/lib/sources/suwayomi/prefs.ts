@@ -22,10 +22,9 @@
 import { gql as defaultGql, type Gql } from './client';
 import { OPS } from './operations';
 import { say, type Part } from '../../said';
+import type { PrefType, PrefValue } from '../types';
 
-/** The five kinds of preference, as the settings sheet draws them. `text` is the engine's EditTextPreference. */
-export type PrefType = 'switch' | 'checkbox' | 'list' | 'multiselect' | 'text';
-export type PrefValue = boolean | string | string[];
+export type { PrefType, PrefValue } from '../types';
 
 export interface SourcePref {
   key: string;

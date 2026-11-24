@@ -1,8 +1,11 @@
 'use client';
-// An extension's own settings (#116): the preference screen Mihon shows for a source. The body is a section of an
-// extension source's sheet in Admin → Sources (v0.54.0; the extension's sheet in Admin → Extensions in v0.53.0), which
-// the deep link `?tab=Sources&settings=<source id>` opens on its settings -- the add dialog, the series page and Health
-// use it -- and a sheet of its own for a source that link names and the sources list does not hold.
+// A source's own settings (#116): for an extension, the preference screen Mihon shows; for a source pack, the
+// declarations the pack ships (bff lib/sources/preferences.ts). The body is a section of an extension source's sheet
+// in Admin → Sources (v0.54.0; the extension's sheet in Admin → Extensions in v0.53.0), which the deep link
+// `?tab=Sources&settings=<source id>` opens on its settings -- the add dialog, the series page and Health use it -- and
+// a sheet of its own for a source that link names and the sources list does not hold. A pack's body is a section of
+// its own source sheet (components/SourceSheet.tsx): a pack has no engine, so its values are the server's
+// (`source_settings`), and one left unset falls back to the pack's environment or `.uchi.env`.
 //
 // Issue #116 is why it exists: the Webtoons extension numbers posts by the episode in their titles, so Istrevelia's
 // 226 posts land on 13 numbers, and its own "Use sequential chapter numbering" switch -- the fix the reporter
@@ -47,11 +50,16 @@ export type SettingsTarget = { sourceId: string; name?: string } | { pkgName: st
 /** A change waiting for its second word: the numbering setting, the value, and how many series it renumbers. */
 interface Pending { pref: SourcePref; value: PrefValue }
 
+/** Where a kind's settings live: an extension's under its engine, a pack's under its source id. */
+export type PrefsKind = 'extension' | 'pack';
+const prefsBase = (kind: PrefsKind) => (kind === 'pack' ? '/api/admin/sources' : '/api/admin/extensions/sources');
+
 /** One source's settings, as both the sheet below and an extension's sheet read them. */
-function useSourcePrefs(sourceId: string | null) {
+function useSourcePrefs(sourceId: string | null, kind: PrefsKind) {
+  const base = prefsBase(kind);
   return useQuery({
-    queryKey: ['ext-prefs', sourceId] as const,
-    queryFn: () => api<SourcePrefsAnswer>(`/api/admin/extensions/sources/${encodeURIComponent(sourceId!)}/preferences`),
+    queryKey: ['source-prefs', kind, sourceId] as const,
+    queryFn: () => api<SourcePrefsAnswer>(`${base}/${encodeURIComponent(sourceId!)}/preferences`),
     enabled: !!sourceId,
     retry: false,
   });
@@ -76,7 +84,7 @@ export function ExtensionSettings({ target, onClose }: { target: SettingsTarget;
     // The first source switched on, else the first listed: the one a person most likely reads.
     if (!sourceId && pkgSources?.content.length) setSourceId((pkgSources.content.find((s) => s.enabled) ?? pkgSources.content[0]).id);
   }, [pkgSources, sourceId]);
-  const { data } = useSourcePrefs(sourceId);
+  const { data } = useSourcePrefs(sourceId, 'extension');
   const name = data?.source.extensionName || target.name || data?.source.name || tr('Extension');
 
   if (typeof document === 'undefined') return null;
@@ -106,24 +114,27 @@ export function ExtensionSettings({ target, onClose }: { target: SettingsTarget;
  * One source's settings, with the language picker when its extension has several (each keeps its own settings).
  * `note` adds the sentence the deep-link sheet keeps in its footer, for a body inside another sheet.
  */
-export function ExtensionSettingsBody({ sourceId, onSourceId, note = false }: {
+export function ExtensionSettingsBody({ sourceId, onSourceId, note = false, kind = 'extension' }: {
   sourceId: string;
   onSourceId: (id: string) => void;
   note?: boolean;
+  /** Whose settings these are: an extension's engine screen, or a pack's server-stored values. */
+  kind?: PrefsKind;
 }) {
   const toast = useToast();
   const qc = useQueryClient();
   const [pending, setPending] = useState<Pending | null>(null);
   const [saving, setSaving] = useState<string | null>(null);
   const [texts, setTexts] = useState<Record<string, string>>({});
-  const key = ['ext-prefs', sourceId] as const;
-  const { data, isError, error, isLoading } = useSourcePrefs(sourceId);
+  const base = prefsBase(kind);
+  const key = ['source-prefs', kind, sourceId] as const;
+  const { data, isError, error, isLoading } = useSourcePrefs(sourceId, kind);
 
   const send = async (pref: SourcePref, value: PrefValue) => {
     setPending(null);
     setSaving(pref.key);
     try {
-      const r = await api<PrefWriteAnswer>(`/api/admin/extensions/sources/${encodeURIComponent(sourceId)}/preferences`, { json: { key: pref.key, value } });
+      const r = await api<PrefWriteAnswer>(`${base}/${encodeURIComponent(sourceId)}/preferences`, { json: { key: pref.key, value } });
       qc.setQueryData(key, (old: SourcePrefsAnswer | undefined) => (old ? { ...old, preferences: r.preferences, usedBy: r.usedBy, renumbers: r.renumbers } : old));
       // A renamed library shows up on the series pages and in the add dialog's counts.
       if (r.remap) qc.invalidateQueries({ queryKey: ['series-listing'] });
@@ -131,6 +142,21 @@ export function ExtensionSettingsBody({ sourceId, onSourceId, note = false }: {
       if (!r.applied) toast(tr('The extension did not take the change.'), 'error');
       else if (r.remap) toast(r.remap === 1 ? tr('Saved. 1 series is waiting for you to review the renumbering.') : tr('Saved. {n} series are waiting for you to review the renumbering.', { n: r.remap }), 'success');
       else if (r.changed) toast(tr('Saved'), 'success');
+      if (pref.type === 'text') setTexts((t) => { const { [pref.key]: _gone, ...rest } = t; return rest; });
+    } catch (e) {
+      toast(...errorNoticeOf(e, prefErrorText(e, tr('Could not change that setting'))));
+    }
+    setSaving(null);
+  };
+  /** Drop the stored layer: the pack falls back to its own environment or `.uchi.env` again. */
+  const reset = async (pref: SourcePref) => {
+    setSaving(pref.key);
+    try {
+      const r = await api<PrefWriteAnswer>(`${base}/${encodeURIComponent(sourceId)}/preferences/${encodeURIComponent(pref.key)}`, { method: 'DELETE' });
+      qc.setQueryData(key, (old: SourcePrefsAnswer | undefined) => (old ? { ...old, preferences: r.preferences, usedBy: r.usedBy, renumbers: r.renumbers } : old));
+      if (r.remap) qc.invalidateQueries({ queryKey: ['series-listing'] });
+      qc.removeQueries({ queryKey: ['src-detail'] });
+      if (r.changed) toast(tr('Reset'), 'success');
       if (pref.type === 'text') setTexts((t) => { const { [pref.key]: _gone, ...rest } = t; return rest; });
     } catch (e) {
       toast(...errorNoticeOf(e, prefErrorText(e, tr('Could not change that setting'))));
@@ -162,9 +188,13 @@ export function ExtensionSettingsBody({ sourceId, onSourceId, note = false }: {
 
       {isLoading && <p className="py-4 text-sm text-fog-500">{tr('Loading…')}</p>}
       {isError && (
-        <p role="alert" className="py-4 text-sm text-amber-300">{prefErrorText(error, tr('The extension engine did not answer. Try again in a moment.'))}</p>
+        <p role="alert" className="py-4 text-sm text-amber-300">
+          {prefErrorText(error, kind === 'pack' ? tr('Could not load these settings.') : tr('The extension engine did not answer. Try again in a moment.'))}
+        </p>
       )}
-      {data && !prefs.length && <p className="py-4 text-sm text-fog-500">{tr('This extension has no settings.')}</p>}
+      {data && !prefs.length && (
+        <p className="py-4 text-sm text-fog-500">{kind === 'pack' ? tr('This source has no settings.') : tr('This extension has no settings.')}</p>
+      )}
 
       <div className="divide-y divide-ink-800/70" data-ext-settings>
         {prefs.map((p) => {
@@ -179,6 +209,12 @@ export function ExtensionSettingsBody({ sourceId, onSourceId, note = false }: {
                   <p className="text-sm text-fog-100">{p.title || p.key}</p>
                   {summary && <p className="mt-0.5 text-[11px] leading-relaxed text-fog-500">{summary}</p>}
                   {!p.enabled && <p className="mt-0.5 text-[11px] text-fog-600">{tr('Not available in this version of the extension.')}</p>}
+                  {p.set && kind === 'pack' && (
+                    <button type="button" onClick={() => void reset(p)} disabled={off}
+                      className="mt-1 text-[11px] text-fog-400 underline-offset-2 hover:text-fog-200 hover:underline" data-pref-reset>
+                      {tr('Reset')}
+                    </button>
+                  )}
                 </div>
                 {control === 'switch' && (
                   <Switch on={p.value === true} disabled={off} label={p.title || p.key} onChange={(v) => change(p, v)} />
@@ -211,7 +247,11 @@ export function ExtensionSettingsBody({ sourceId, onSourceId, note = false }: {
                   <div className="mt-2">
                     {p.dialogMessage && <p className="mb-1 text-[11px] text-fog-500">{p.dialogMessage}</p>}
                     <div className="flex gap-2">
-                      <input value={draft} disabled={off} aria-label={p.dialogTitle || p.title || p.key} maxLength={2000}
+                      <input value={draft} disabled={off} aria-label={p.dialogTitle || p.title || p.key}
+                        maxLength={kind === 'pack' ? 4096 : 2000}
+                        type={p.secret ? 'password' : 'text'}
+                        placeholder={p.unreadable ? tr('The stored value could not be read. Enter it again.')
+                          : p.set && kind === 'pack' ? tr('Stored. Enter a new value to replace it.') : undefined}
                         onChange={(e) => setTexts((t) => ({ ...t, [p.key]: e.target.value }))}
                         onKeyDown={(e) => { if (e.key === 'Enter' && dirty && !off) change(p, draft); }}
                         autoCapitalize="none" autoCorrect="off" spellCheck={false}
@@ -262,7 +302,9 @@ export function ExtensionSettingsBody({ sourceId, onSourceId, note = false }: {
       </div>
       {note && data && (
         <p className="pt-2 text-[11px] leading-relaxed text-fog-500" data-ext-settings-footer>
-          {tr('These are the extension’s own settings, the same ones Mihon shows; they apply to every series from this source.')}
+          {kind === 'pack'
+            ? tr('These settings belong to this source. A setting left unset falls back to the pack’s own configuration.')
+            : tr('These are the extension’s own settings, the same ones Mihon shows; they apply to every series from this source.')}
         </p>
       )}
     </div>
