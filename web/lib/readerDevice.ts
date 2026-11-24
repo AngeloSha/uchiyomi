@@ -38,6 +38,11 @@ export interface DevicePrefs {
    * does what Tap zones says, the middle shows the controls, the reader as it always was -- until chosen.
    */
   tapFocus: boolean;
+  /**
+   * Slide the page when it turns (#461): on -- every page turn and step down the column glides, the reader as it always
+   * was -- until switched off, when they jump. The E-ink filter jumps too, whatever this says.
+   */
+  pageAnimation: boolean;
 }
 
 /** Column width's range and step, in percent: the sheet's slider and what a stored value is cleaned to. */
@@ -58,6 +63,7 @@ export const DEFAULT_DEVICE: DevicePrefs = {
   columnWidth: COLUMN_WIDTH.max,
   fitPages: false,
   tapFocus: false,
+  pageAnimation: true,
 };
 
 export const DEVICE_KEY = 'yomi_reader_device';
@@ -75,6 +81,7 @@ export function migrateDevicePrefs(raw: unknown): DevicePrefs {
     columnWidth: cleanColumnWidth(r.columnWidth),
     fitPages: r.fitPages === true,
     tapFocus: r.tapFocus === true,
+    pageAnimation: r.pageAnimation !== false,
   };
 }
 
@@ -106,8 +113,9 @@ export const COLOR_FILTER: Record<ColorFilter, string | undefined> = {
 
 /**
  * How a page turn or a step down the column moves. An e-ink screen cannot draw a glide -- it smears it into a dozen
- * ghosted refreshes -- so under E-ink every move is a jump. Everywhere else, as before, a glide.
+ * ghosted refreshes -- so under E-ink every move is a jump. So it is for a reader who switched Page turn animation off
+ * (#461), on any filter. Everywhere else, as before, a glide.
  */
-export function glide(f: ColorFilter): ScrollBehavior {
-  return f === 'eink' ? 'auto' : 'smooth';
+export function glide(f: ColorFilter, animate = true): ScrollBehavior {
+  return f === 'eink' || !animate ? 'auto' : 'smooth';
 }

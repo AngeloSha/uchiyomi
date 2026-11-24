@@ -204,6 +204,18 @@ export function ReaderSettings({
           <p className="mt-2 text-[11px] leading-snug text-fog-500">{tr('Over the pages only. E-ink also turns pages without sliding.')}</p>
         </Row>
 
+        {/* #461: slide or jump when a page turns, on this device. On until switched off: every turn glides, as it always
+            did. E-ink jumps whatever this says. */}
+        <div className="py-3">
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-sm font-medium text-fog-200">{`${tr('Page turn animation')} · ${tr('This device')}`}</span>
+            <Switch on={device.pageAnimation} onChange={(pageAnimation) => setDevice({ pageAnimation })} label={tr('Page turn animation')} />
+          </div>
+          <p className="mt-1 text-[11px] leading-snug text-fog-500">
+            {tr('Off, a page turn jumps instead of sliding. The colour filter is not touched.')}
+          </p>
+        </div>
+
         {/* #170: the cover's colour across the top and bottom of the screen. A switch on one line, the only boolean here:
             on by default, and the same setting as Profile → Settings → Reading -- every title, not this one. */}
         <div className="flex items-center justify-between gap-3 py-3">
