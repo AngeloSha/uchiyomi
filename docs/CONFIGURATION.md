@@ -261,9 +261,11 @@ plugin and hit **Admin → Sources → Add sources → Reload sources** (`POST /
 With no sites added, no extensions installed and no pack mounted, Uchiyomi is just a clean reader for the library
 you already own.
 
-A plugin can declare `preferences` on its adapter (switch, checkbox, list, multiselect or text). Once the pack is
-loaded, they appear under **Admin → Sources → (source) → Settings**, and are stored in the database by the server;
-changing a value needs no reload. A value
+Every loaded pack also has a server-owned **Auto Update?** switch in the same place: off means the nightly
+sweep leaves it alone (a manual Check still asks it), and it applies even to a pack that declares no
+preferences. A plugin can declare `preferences` on its adapter (switch, checkbox, list, multiselect or text).
+Once the pack is loaded, they appear under **Admin → Sources → (source) → Settings**, and are stored in the
+database by the server; changing a value needs no reload. A value
 set there wins; an unset one falls back to the plugin's own configuration (environment, `.uchi.env` or an in-file
 constant), so existing deployments keep working. Text values may be marked `secret`, in which case they are
 encrypted under a key derived from `JWT_SECRET` and never returned to the browser. **Reset** clears the stored

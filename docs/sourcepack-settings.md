@@ -1,7 +1,8 @@
 # Source pack settings in the WebUI
 
-Status: implemented (steps 1 and 2 of the rollout). Written 2026-11-24 against 0.109.0;
-the core is server- and web-side only until a pack declares `preferences`.
+Status: implemented (steps 1, 2 and 6 of the rollout). Written 2026-11-24 against 0.109.0;
+the core is server- and web-side only until a pack declares `preferences`. Every loaded pack
+already has the server-owned **Auto Update?** switch.
 
 This is the follow-up to the extension settings screen: source packs should get the same
 **Admin → Sources → (source) → Settings** experience, plus a per-source **Auto Update?** switch
@@ -76,8 +77,8 @@ dominant fields are secrets (clearance tokens, cookie headers, bearer tokens).
   database with `pg_dump`, so no backup change is needed.
 - A numbering option is **not required**. The descriptor may carry `numbering` for the day a pack
   changes chapter numbers, but no current pack does.
-- **Auto Update?** is wanted for every pack, but is out of scope for the first implementation
-  ([later](#later-auto-update-per-source)).
+- **Auto Update?** is server-owned and shown for every pack, declared settings or not
+  ([below](#auto-update-per-source)).
 
 ## Contract
 
@@ -220,8 +221,8 @@ DELETE /api/admin/sources/:id/preferences/:key
 ```
 
 - Reject `sw:<id>` ids: extensions keep their existing route and their engine's semantics.
-- Look up the loaded adapter and its descriptors. No descriptors: return an empty `preferences`
-  list (the overview flag keeps the section hidden until Auto Update exists).
+- Look up the loaded adapter and its descriptors. Every pack answers with the `autoUpdate` switch
+  first, then its declared preferences; no descriptors leaves just that one.
 - Respond with the same shape the extension screen already consumes, so the web model is reused:
   `{ source, siblings: [], preferences, usedBy, renumbers }`, and on write
   `{ ok, changed, applied: true, remap: 0, preferences, usedBy, renumbers }`.
@@ -234,8 +235,8 @@ DELETE /api/admin/sources/:id/preferences/:key
 - A changed value clears the adapter's detail cache, so the next request sees it without a reload.
   `numbering_pending` is written only when the descriptor says `numbering`, and the response's
   `remap` is the number of series queued; it stays 0 for every current pack.
-- Add `settings: boolean` to `OverviewSource` in `bff/src/lib/sourcesOverview.ts`, computed from the
-  adapter's descriptors (and, once Auto Update lands, true for every pack). The sheet needs this to
+- Add `settings: boolean` to `OverviewSource` in `bff/src/lib/sourcesOverview.ts`: true for every
+  loaded pack (Auto Update) and for any adapter that declares preferences. The sheet needs this to
   decide whether to draw the section without an extra request per source.
 
 ## Web UI
@@ -256,7 +257,8 @@ DELETE /api/admin/sources/:id/preferences/:key
   meaning.
 - New strings (about 8) must land in all nine locale files, or
   `web/test/localeCoverage.test.ts` fails: Settings, no settings, Saved, Reset, stored placeholder,
-  the fallback note, the unreadable-secret sentence, Auto Update (later).
+  the fallback note, the unreadable-secret sentence. The Auto Update title and summary come from
+  the server, like pack-provided titles, and are not translated.
 - Pack-provided titles and summaries are not translated, exactly like Mihon extension preferences.
 
 ## Pack-side changes
@@ -286,33 +288,30 @@ const adapter = require('../sources/schale.js').register({ settings: async () =>
 Assert precedence (stored beats env beats file beats constant), that a stored change is visible on
 the next call, and that an unset key still falls through.
 
-## Later: Auto Update per source
+## Auto Update per source
 
-Requirement (2026-11-24): every source pack gets an **Auto Update?** toggle, so an admin can keep a
-pack installed and searchable while it stops polling for new chapters. This is a server-owned
-preference, not something a pack declares, so every pack shows it even with no `preferences`.
+Every source pack gets an **Auto Update?** toggle, so an admin can keep a pack installed and
+searchable while it stops polling for new chapters. This is a server-owned preference, not
+something a pack declares, so every pack shows it even with no `preferences`. The key is reserved
+(`AUTO_UPDATE_KEY`): a declaration of `autoUpdate` is dropped at load.
 
-Semantics to settle before building:
+As built:
 
-- Only the automatic new-chapter sweep, or also source scout, fill-details and repair? The updater
-  is the obvious scope; the rest should keep working unless asked.
-- A series with copies from two packs should still update through the other one. The updater
-  iterates source copies (`f.source` in `bff/src/lib/updater.ts`, skip point near `blockedNow` at
-  `:419`), so the switch belongs on the copy, not the series.
-- Health must say "updates paused", not "switched off": do **not** reuse
-  `source_health.disabled`, which `bff/src/lib/sourceStanding.ts` reads as `off` for Replace, Find
-  and Health. `bff/src/lib/health.ts:596` already has an `updates_paused` action for a paused series
-  and is the model.
-- Manual actions stay manual: Check now, Test, search and add must ignore the switch.
-
-Storage recommendation: `source_health.auto_update boolean NOT NULL DEFAULT true`, because that
-table already has one row per source (created lazily), already holds the `disabled` admin
-preference, and the updater already reads it through the standings. The alternative is a reserved
-key in `source_settings`, which keeps all per-source switches in one place but mixes server-owned
-and pack-declared keys.
-
-Once it exists, the pack settings section renders for every pack, so the overview flag becomes
-`settings: true` for all pack sources.
+- Scope is the unattended new-chapter run (`UpdateOpts.unattended`, the nightly sweep and the other
+  automatic passes). A Check now, Test, search or add ignores it.
+- The switch belongs to the source copy, not the series. The updater reads all paused ids for a
+  series in one query (`autoUpdatePaused`), skips that copy's listing, and still updates through
+  another copy that is not paused. All copies paused ends the series as `off`: a deliberate
+  choice, not a failure, and no scout is requested.
+- Storage is `source_health.auto_update boolean NOT NULL DEFAULT true`: one row per source already
+  exists, and `disabled` stays the separate "switched off" switch that `sourceStanding` reads.
+  Default true means a source with no row has never been paused.
+- `GET /api/admin/sources/:id/preferences` prepends the synthetic switch; `POST` and `DELETE` with
+  the key `autoUpdate` set it back to on. Those writes are audited as `source.auto_update` /
+  `source.auto_update_reset`, and change no cache or numbering state.
+- The overview `settings` flag is true for every loaded pack, so the section is always available.
+- Health's per-source wording ("updates paused") is not wired yet: a healthy paused source simply
+  remains absent from Health's list. Nothing reads `auto_update` as `off`.
 
 ## Rollout
 
@@ -323,14 +322,15 @@ Once it exists, the pack settings section renders for every pack, so the overvie
 | 3 | Pilot `schale.js` in `uchi-sources`, then the remaining five files with options. ~90 lines across the pack repo. | Next, in the separately kept pack repository. |
 | 4 | Docs: pack contract in `docs/CONFIGURATION.md` (the section at `:235-262`), routes in `docs/api.md`. | Done in this tree. |
 | 5 | Tests: descriptor validation, route auth/validation/secret round-trip/reset, loader skip, overview flag; web control rendering and locale coverage; pack fake-host test. | Descriptor unit test and locale coverage landed; pack fake-host test travels with step 3. |
-| 6 | Later: Auto Update toggle, migration, updater and Health wiring, string, overview change. | Deferred. |
+| 6 | Auto Update toggle: `source_health.auto_update`, reserved key, updater skip, overview change, docs. | Done in this tree; Health wording still open. |
 
 The first step is inert: no pack declares descriptors, so no screen changes until step 3. A pack
 that declares one gets the section without a server change.
 
 ## Open questions
 
-- Auto Update scope and storage (above).
+- Health's per-source wording for a paused source ("updates paused" instead of silence) is not
+  wired yet.
 - Multi-line input for cookie headers? A single-line text input works but is unpleasant for a
   1 KB cookie string; a textarea variant could be added to the `text` type later.
 - Group preferences by pack file rather than adapter id? Deferred; the three-adapter packs are the

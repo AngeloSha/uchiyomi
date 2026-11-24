@@ -5,7 +5,7 @@
 import { q, one } from './db';
 import { getSource, SourceChapter, withTimeout } from './sources';
 import { persistScan, setBookDates, setBookMeta, DL_ROOT } from './library';
-import { blockedNow, isDisabled, noteStage } from './sourceHealth';
+import { autoUpdatePaused, blockedNow, isDisabled, noteStage } from './sourceHealth';
 import { standingsOf, switchedOff } from './sourceStanding';
 import { noteChapterFailure } from './chapterFailures';
 import { budgetFor } from './sources/budget';
@@ -376,12 +376,17 @@ async function visitSeries(seriesId: string, maxNew: number, opts: UpdateOpts): 
     }
     followed = on;
   }
+  // Auto Update off on a source: the nightly sweep does not ask it, while a Check on the series still does. Read
+  // once per series, not per source; only an unattended run honours it, so a person's Check is never silently
+  // narrowed to some of the copies they can see.
+  const autoPaused = opts.unattended ? await autoUpdatePaused(followed.map((f) => f.source)) : new Set<string>();
 
   // A throw and an empty list are NOT the same answer, and collapsing them is what made a broken source
   // indistinguishable from a series with nothing new. routes/sources.ts already separates these two, with a
   // comment saying why, two files away.
   let tagged: SourceChapter[] = [];
   let blocked = 0;
+  let pausedCount = 0;
   let answered = 0;
   let askedSource = false;
   // v0.79.0: which followed sources answered with chapters this run (`fresh`), and which said nothing because they could
@@ -416,6 +421,7 @@ async function visitSeries(seriesId: string, maxNew: number, opts: UpdateOpts): 
       return { ...nothing(s.title, 'paused'), asked: askedSource };
     }
     if (answered > 0 && backups.has(f.source)) { stale.set(f.source, 'resting'); continue; }
+    if (autoPaused.has(f.source)) { pausedCount++; stale.set(f.source, 'resting'); continue; }
     if (opts.resting?.(f.source) || await blockedNow(f.source)) { blocked++; stale.set(f.source, 'cooling'); continue; }
     // Looked up again after the awaits above: an extension refresh can unregister an adapter between
     // building the list and asking it, and that is a source that did not answer, not a crash.
@@ -452,6 +458,9 @@ async function visitSeries(seriesId: string, maxNew: number, opts: UpdateOpts): 
     if (s.numbering !== 'posting_order') await requestScout(seriesId, 'stuck', { ifBehind: true });
     return nothing(s.title, 'blocked');
   }
+  // Every copy was paused by its own Auto Update switch: a choice, like a switched-off source, so nothing is
+  // scouted for it and the next sweep will ask again once one is turned back on.
+  if (blocked + pausedCount === followed.length) return nothing(s.title, 'off');
   if (!answered) {
     await stampChecked(seriesId, null, null);
     if (s.numbering !== 'posting_order') await requestScout(seriesId, 'stuck', { ifBehind: true });

@@ -17,6 +17,8 @@ export interface SourceHealth {
   last_ok_at: string | null;
   blocked_until: string | null;
   disabled: boolean;
+  /** Whether the nightly sweep asks this source. Server-owned; every pack shows it, declared settings or not. */
+  auto_update: boolean;
   /** Consecutive empty `latest()` pages. Evidence for the diagnosis layer; nothing else reads it. */
   empty_streak: number;
   last_empty_at: string | null;
@@ -191,7 +193,7 @@ export async function blockedNow(sourceId: string): Promise<SourceHealth | null>
 }
 
 export const healthAll = () =>
-  q<SourceHealth>('SELECT source_id, status, consecutive, last_error, last_fail_at, last_ok_at, blocked_until, disabled, empty_streak, last_empty_at, checked_at, check_code, slow_streak, last_slow_at, updated_at FROM source_health');
+  q<SourceHealth>('SELECT source_id, status, consecutive, last_error, last_fail_at, last_ok_at, blocked_until, disabled, auto_update, empty_streak, last_empty_at, checked_at, check_code, slow_streak, last_slow_at, updated_at FROM source_health');
 
 export const isDisabled = async (sourceId: string) =>
   !!(await one<{ disabled: boolean }>('SELECT disabled FROM source_health WHERE source_id = $1', [sourceId]))?.disabled;
@@ -199,6 +201,23 @@ export const isDisabled = async (sourceId: string) =>
 export const setDisabled = (sourceId: string, disabled: boolean) =>
   q(`INSERT INTO source_health (source_id, disabled, updated_at) VALUES ($1, $2, now())
      ON CONFLICT (source_id) DO UPDATE SET disabled = $2, updated_at = now()`, [sourceId, disabled]);
+
+/** Default true: a source nobody has a row for has never been paused. */
+export const sourceAutoUpdate = async (sourceId: string) =>
+  (await one<{ auto_update: boolean }>('SELECT auto_update FROM source_health WHERE source_id = $1', [sourceId]))?.auto_update ?? true;
+
+export const setSourceAutoUpdate = (sourceId: string, on: boolean) =>
+  q(`INSERT INTO source_health (source_id, auto_update, updated_at) VALUES ($1, $2, now())
+     ON CONFLICT (source_id) DO UPDATE SET auto_update = $2, updated_at = now()`, [sourceId, on]);
+
+/** The paused sources among `ids`, in one query: the sweep asks this once per series, not once per source. */
+export async function autoUpdatePaused(ids: string[]): Promise<Set<string>> {
+  if (!ids.length) return new Set();
+  const rows = await q<{ source_id: string }>(
+    'SELECT source_id FROM source_health WHERE auto_update = false AND source_id = ANY($1)', [ids],
+  ).catch(() => []);
+  return new Set(rows.map((r) => r.source_id));
+}
 
 /**
  * Drop the health rows of sources that no longer exist, unless a series still points at them.

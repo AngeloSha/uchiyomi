@@ -3095,8 +3095,10 @@ extensions keep logins and keys in them.
 **A source pack's settings.** A separately built source pack can declare `preferences` on its adapter; those
 appear under **Admin → Sources → (source) → Settings** and are stored by Uchiyomi, because a pack has no engine
 screen. `GET /api/admin/sources/:id/preferences` answers `{ source { id, name, lang, pkgName: null, extensionName:
-null }, siblings: [], preferences, usedBy, renumbers }`; each preference is the extension shape plus `secret`,
-`set` and `unreadable`. A `secret` value is never returned (`value: null`, `set: true`); `unreadable` says the
+null }, siblings: [], preferences, usedBy, renumbers }`; every pack answers with a server-owned
+`autoUpdate` switch first (the nightly sweep asks the source only while it is on; `POST`/`DELETE` with that key
+change it, audited as `source.auto_update` / `source.auto_update_reset`), then its declared preferences. Each
+preference is the extension shape plus `secret`, `set` and `unreadable`. A `secret` value is never returned (`value: null`, `set: true`); `unreadable` says the
 stored value could not be decrypted, and the admin is asked to enter it again. `POST` with `{ key, value }` is
 validated against the descriptor, not a generic union: booleans, strings up to 4096 characters, and up to 200
 choices of 512 characters, **400** `unknown_pref` or `bad_value` with `messageSaid` (`setting.*`).

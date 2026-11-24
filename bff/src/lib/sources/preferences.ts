@@ -8,6 +8,8 @@ const TYPES: readonly PrefType[] = ['switch', 'checkbox', 'list', 'multiselect',
 const KEY = /^[A-Za-z_][A-Za-z0-9_.-]{0,127}$/;
 /** Long enough for a full browser Cookie header, short enough that the field stays a setting and not a document. */
 export const SETTING_TEXT_MAX = 4096;
+/** Reserved: the route owns this switch (routes/sourceSettings.ts), so a pack cannot toggle the sweep itself. */
+export const AUTO_UPDATE_KEY = 'autoUpdate';
 
 export type SettingErrorCode = 'unknown_pref' | 'bad_value';
 
@@ -75,7 +77,8 @@ export function validatePreferences(input: unknown): SourcePreference[] {
   const seen = new Set<string>();
   for (const raw of Array.isArray(input) ? input : []) {
     const p = raw as Partial<SourcePreference> | null;
-    if (!p || typeof p.key !== 'string' || !KEY.test(p.key) || seen.has(p.key) || !TYPES.includes(p.type as PrefType)) continue;
+    if (!p || typeof p.key !== 'string' || !KEY.test(p.key) || p.key === AUTO_UPDATE_KEY
+      || seen.has(p.key) || !TYPES.includes(p.type as PrefType)) continue;
     const type = p.type as PrefType;
     const entries = Array.isArray(p.entries) ? p.entries.filter((v): v is string => typeof v === 'string') : undefined;
     const entryValues = Array.isArray(p.entryValues) ? p.entryValues.filter((v): v is string => typeof v === 'string') : undefined;

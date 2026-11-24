@@ -30,6 +30,14 @@ test('a bad declaration is dropped alone, never the source', () => {
   assert.equal(kept[2].default, undefined);
 });
 
+test('the Auto Update key is reserved: a pack cannot declare or override the sweep switch', () => {
+  const kept = validatePreferences([
+    { key: 'autoUpdate', type: 'switch', title: 'Mine' },
+    { key: 'UA', type: 'text' },
+  ]);
+  assert.deepEqual(kept.map((p) => p.key), ['UA']);
+});
+
 test('a choice outside the declaration is refused, and a multi-select is deduplicated', () => {
   const p = { key: 'MODE', type: 'multiselect' as const, title: 'Mode', entryValues: ['a', 'b'] };
   assert.deepEqual(validateSettingValue(p, ['b', 'a', 'b']), ['b', 'a']);
