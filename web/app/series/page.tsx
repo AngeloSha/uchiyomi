@@ -18,6 +18,7 @@ import { Img, Backdrop, SectionTitle, useWideViewport } from '@/components/ui';
 import { SeriesCard } from '@/components/cards';
 import { useToast } from '@/components/Toast';
 import { ConfirmDialog, Modal, actionFailure, listActionFailure, msgOf } from '@/components/ConfirmDialog';
+import { BlockGroupsDialog } from '@/components/BlockGroupsDialog';
 import { MoveToLibrary } from '@/components/MoveToLibrary';
 import { moveSeriesToLibrary } from '@/lib/moveLibrary';
 import { requestFailure } from '@/lib/refusals';
@@ -448,7 +449,7 @@ function ButtonsWrap({ compact, menuOpen, children }: { compact: boolean; menuOp
   return <div className={buttonsClass(menuOpen)}>{children}</div>;
 }
 
-function ChapterRow({ book, downloaded, sourceNames, primarySource, versions, onReader, onToggleDownload, onMark, onEdit, onVersions, onReplaceFrom, onCopyPath, onHide, onRefetch, onDelete, selectable, selected, onToggle, compact, lit, talk, onTalk }: {
+function ChapterRow({ book, downloaded, sourceNames, primarySource, versions, onReader, onToggleDownload, onMark, onEdit, onVersions, onReplaceFrom, onCopyPath, onHide, onRefetch, onDelete, onBlock, selectable, selected, onToggle, compact, lit, talk, onTalk }: {
   book: Book;
   /** v0.87.0: the chapter's talk for the caption, and the menu's Comments, while the household has any. */
   talk?: ChapterTalkCount | null;
@@ -466,6 +467,11 @@ function ChapterRow({ book, downloaded, sourceNames, primarySource, versions, on
    */
   onRefetch?: () => void;
   onDelete?: () => void;
+  /**
+   * Admins only, on a single-chapter file Uchiyomi downloaded (#396): block this chapter's groups for the series and
+   * remove what that leaves to blocked groups alone -- components/BlockGroupsDialog.tsx, which asks first.
+   */
+  onBlock?: () => void;
   /** Lit for a moment: the chapter a `?ch=` link (Health's Open) came to see. */
   lit?: boolean;
   /** The opt-in compact chapter list (lib/compactChapters.ts). Off: the row is exactly as it always was. */
@@ -509,6 +515,7 @@ function ChapterRow({ book, downloaded, sourceNames, primarySource, versions, on
     ...(onHide ? [{ label: tr('Hide chapter {n}', { n: book.number }), divider: !onEdit && !onCopyPath, hook: 'hide-chapter', onSelect: onHide }] : []),
     ...(onRefetch ? [{ label: tr('Fetch again'), divider: true, onSelect: onRefetch }] : []),
     ...(onDelete ? [{ label: tr('Delete from server'), divider: !onRefetch, danger: true, onSelect: onDelete }] : []),
+    ...(onBlock ? [{ label: tr('Block group and remove…'), divider: !onRefetch && !onDelete, danger: true, hook: 'block-remove', onSelect: onBlock }] : []),
   ], { label: tr('Chapter actions') });
   // Only a name is shown; an id that resolves to nothing (a source since removed) shows no caption at all.
   const altSource = book.sourceId && book.sourceId !== primarySource ? (sourceNames?.[book.sourceId] ?? null) : null;
@@ -616,7 +623,7 @@ function SelectBubble({ selected }: { selected: boolean }) {
  * dimmed, because "this server does not have it" is still true. The mark lives in its own table and becomes
  * ordinary progress when the chapter lands (bff lib/listingProgress).
  */
-function GhostRow({ ghost, sourceNames, primarySource, selectable, selected, onToggle, onFetch, onOpen, onMark, onHide, compact, wholeHere }: {
+function GhostRow({ ghost, sourceNames, primarySource, selectable, selected, onToggle, onFetch, onOpen, onMark, onHide, onBlock, compact, wholeHere }: {
   ghost: Ghost;
   /** The series holds a chapter at this ghost's whole number: what a covered row's caption says (lib/chapterRows.ts whyLabel). */
   wholeHere?: boolean;
@@ -640,6 +647,11 @@ function GhostRow({ ghost, sourceNames, primarySource, selectable, selected, onT
   onMark?: (completed: boolean) => void;
   /** Admins only (#240): hide this number from the series, for everyone -- a source's stray. It asks first. */
   onHide?: () => void;
+  /**
+   * Admins only (#396): block the groups that list this number for the series -- a wrong number whose download keeps
+   * failing is never on disk -- and clear what is left of it. components/BlockGroupsDialog.tsx asks first.
+   */
+  onBlock?: () => void;
 }) {
   const [busy, setBusy] = useState(false);
   const read = ghost.read === true;
@@ -647,8 +659,9 @@ function GhostRow({ ghost, sourceNames, primarySource, selectable, selected, onT
   const menu = useContextMenu(() => [
     ...(onMark ? [{ label: read ? tr('Mark unread') : tr('Mark read'), onSelect: () => onMark(!read) }] : []),
     ...(onHide ? [{ label: tr('Hide chapter {n}', { n: ghost.number }), divider: !!onMark, hook: 'hide-chapter', onSelect: onHide }] : []),
+    ...(onBlock ? [{ label: tr('Block group and remove…'), divider: !onHide, danger: true, hook: 'block-remove', onSelect: onBlock }] : []),
   ], { label: tr('Chapter actions') });
-  const hasMenu = !!onMark || !!onHide;
+  const hasMenu = !!onMark || !!onHide || !!onBlock;
   const menuBind = hasMenu && !selectable ? menu.bind : {};
   const label = whyLabel(ghost, { wholeHere });
   // The same rule as the chapter row's caption: the series' own source is the normal case, not news. The
@@ -840,6 +853,13 @@ function SeriesInner() {
   });
   // #240: the chapter numbers a Hide asks about -- a row's ⋯, or the select bar's -- and More's Show hidden chapters.
   const [hiding, setHiding] = useState<number[] | null>(null);
+  // #396: the chapters a Block & remove asks about -- a row's ⋯, or the select bar's. `ghosts` are the ones not
+  // downloaded (a listed number whose download fails); a deleted chapter shown as a ghost goes with `books`, by its id.
+  const [blocking, setBlocking] = useState<{ books: Array<Pick<Book, 'id' | 'number' | 'scanlator'>>; ghosts: Ghost[] } | null>(null);
+  const blockGhosts = (gs: Ghost[]) => ({
+    books: gs.filter((g) => g.bookId && g.numberEnd == null).map((g) => ({ id: g.bookId!, number: g.number, scanlator: g.scanlator })),
+    ghosts: gs.filter((g) => !g.bookId),
+  });
   const [showHidden, setShowHidden] = useState(false);
   const [started, setStarted] = useState<StartedJob | null>(null);
   const clearPicks = () => { setPickedBooks(new Set()); setPickedGhosts(new Set()); };
@@ -1374,6 +1394,10 @@ function SeriesInner() {
   // delete and the server would say `already_pruned` for every one of them. Reintroduce by adding
   // `b.owned &&` back: pick a /library chapter and the delete says "0 deleted" -- or nothing.
   const deletable = pickedBookList.filter((b) => !b.pruned);
+  // Block & remove (#396): what the purge may take -- single-chapter files Uchiyomi downloaded, deleted ones too.
+  // Chapters not downloaded too: a wrong number whose download keeps failing has no file, only its listing.
+  const blockable = pickedBookList.filter((b) => b.owned && b.numberEnd == null);
+  const blockableGhosts = pickedGhostList.filter((g) => g.numberEnd == null);
   // #240: the picked chapters' and grey rows' numbers, each once -- a hide is by number -- never a file holding a range.
   const hideable = useMemo(() => [...new Set([
     ...pickedBookList.filter((b) => b.numberEnd == null).map((b) => b.number),
@@ -1964,6 +1988,7 @@ function SeriesInner() {
                 onHide={isAdmin && b.numberEnd == null ? () => setHiding([b.number]) : undefined}
                 onRefetch={isAdmin && b.owned ? () => setConfirming({ what: 'refetch', books: [b] }) : undefined}
                 onDelete={isAdmin && b.owned && !b.pruned ? () => setConfirming({ what: 'delete', books: [b] }) : undefined}
+                onBlock={isAdmin && b.owned && b.numberEnd == null ? () => setBlocking({ books: [b], ghosts: [] }) : undefined}
                 selectable={selecting} selected={pickedBooks.has(b.id)} onToggle={() => togglePickBook(b.id)}
                 versions={versionsOf.get(b.number)?.length}
                 onVersions={versionsOf.has(b.number) ? () => setChapterSheet({ number: b.number, book: b }) : undefined}
@@ -1983,7 +2008,8 @@ function SeriesInner() {
                   ? () => r.ghost.bookId ? fetchDeleted(r.ghost.bookId) : fetchOne(r.ghost.number)
                   : undefined}
                 onMark={(completed) => markGhost(r.ghost, completed)}
-                onHide={isAdmin && r.ghost.numberEnd == null ? () => setHiding([r.ghost.number]) : undefined} />
+                onHide={isAdmin && r.ghost.numberEnd == null ? () => setHiding([r.ghost.number]) : undefined}
+                onBlock={isAdmin && r.ghost.numberEnd == null ? () => setBlocking(blockGhosts([r.ghost])) : undefined} />
             );
           }
           if (r.kind === 'run') {
@@ -2073,6 +2099,12 @@ function SeriesInner() {
         {isAdmin && (
           <button disabled={acting || !hideable.length} onClick={() => setHiding(hideable)} data-hide-chapters className="btn-key">
             {hideable.length === 1 ? tr('Hide 1 chapter') : hideable.length ? tr('Hide {n} chapters', { n: hideable.length }) : tr('Hide chapters')}
+          </button>
+        )}
+        {isAdmin && (
+          <button disabled={acting || (!blockable.length && !blockableGhosts.length)} data-block-chapters className="btn-key text-rose-300"
+            onClick={() => { const g = blockGhosts(blockableGhosts); setBlocking({ books: [...blockable, ...g.books], ghosts: g.ghosts }); }}>
+            {tr('Block group and remove…')}
           </button>
         )}
         {isAdmin && (
@@ -2378,6 +2410,10 @@ function SeriesInner() {
           onConfirm={() => refetchBooks(confirming.books)}
           onClose={() => setConfirming(null)}
         />
+      )}
+      {blocking && (
+        <BlockGroupsDialog seriesId={id} books={blocking.books} ghosts={blocking.ghosts} copiesOf={(n) => versionsOf.get(n) ?? []}
+          onClose={() => setBlocking(null)} onDone={() => { setBlocking(null); leaveSelect(); }} />
       )}
       {/* #240: a hide asks first -- it changes the series for everyone -- but it is no delete: the plain key, not the red. */}
       {hiding && (

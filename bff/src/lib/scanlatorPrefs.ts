@@ -25,7 +25,7 @@ const strings = (v: unknown): string[] =>
   Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string' && x.trim().length > 0) : [];
 
 /** Whatever is in the column, read as prefs; missing or malformed fields take `fallback`'s. */
-function parseStored(v: unknown, fallback: StoredPrefs): StoredPrefs {
+export function parseStored(v: unknown, fallback: StoredPrefs): StoredPrefs {
   if (!v || typeof v !== 'object' || Array.isArray(v)) return { ...fallback };
   const o = v as Record<string, unknown>;
   const days = o.patienceDays;
