@@ -205,7 +205,7 @@ jobs:
           python3 ios/scripts/fetch-releases.py --repository "$REPOSITORY" --output ios/build/published
           python3 ios/scripts/altstore-source.py --records-dir ios/build/published \
             --repository "$REPOSITORY" --base-url "$BASE_URL" --output ios/build/pages
-      - uses: actions/upload-pages-artifact@v4
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: ios/build/pages
       - name: Publish the beta source
