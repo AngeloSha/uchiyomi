@@ -116,7 +116,7 @@ import { budgetFor } from '../lib/sources/budget';
 import { switchMainSource } from '../lib/mainSource';
 import { refileFailures } from '../lib/chapterFailures';
 import { prepareCleanup, cleanupPreview, cleanupConfirmation, purgeLeftovers, purgeRefusal, unlistedOf, CleanupRefused } from '../lib/sourceLeftovers';
-import { blockedChaptersOf, blockGroupsFor, BlockRefused, purgeBlockedChapters, BlockedPurgeRefused } from '../lib/blockedPurge';
+import { blockedChaptersOf, blockGroupsFor, BlockRefused, clearBlockedNumbers, purgeBlockedChapters, BlockedPurgeRefused } from '../lib/blockedPurge';
 import { mainUses, retireSource } from '../lib/retireSource';
 import { sourcesOverview } from '../lib/sourcesOverview';
 import { titlesFromBackup, entriesFromBackup, type BackupEntry, type BackupTracker } from '../lib/tachibk';
@@ -2223,14 +2223,17 @@ export default async function adminRoutes(app: FastifyInstance) {
     groups: z.array(z.string().trim().min(1).max(80)).min(1).max(50),
     selected: z.array(z.string().min(1).max(128)).max(5000).optional(),
     bookIds: z.array(z.string().min(1).max(128)).max(5000).optional(),
+    // Picked chapters not downloaded (a listed number whose download fails): asked about in the preview, and in the
+    // commit the ones it showed, cleared when still only blocked groups' (lib/blockedPurge.ts clearBlockedNumbers).
+    numbers: z.array(z.number().finite().min(0).max(1e6)).max(5000).optional(),
   }).strict();
   const blockFor = async (req: FastifyRequest, reply: FastifyReply, commit: boolean) => {
     const { id } = req.params as { id: string };
     const b = blockBody.safeParse(req.body);
     if (!b.success) return reply.code(400).send({ error: 'bad_request', message: 'Which groups?' });
     try {
-      const out = await blockGroupsFor(id, b.data.groups, { selected: b.data.selected, commit });
-      const chapters = { chapters: out.books.length, series: out.series, readers: out.readers, books: out.books, groups: out.groups };
+      const out = await blockGroupsFor(id, b.data.groups, { selected: b.data.selected, numbers: b.data.numbers, commit });
+      const chapters = { chapters: out.books.length, series: out.series, readers: out.readers, books: out.books, groups: out.groups, numbers: out.numbers };
       if (!commit) return chapters;
       if (out.added.length) {
         await logAudit('series.settings', { userId: userIdOf(req), detail: { id, blocked: out.added, from: 'chapter' }, req });
@@ -2241,9 +2244,10 @@ export default async function adminRoutes(app: FastifyInstance) {
       const purged = mine.size
         ? await purgeBlockedChapters([...mine], { userId: userIdOf(req), req, claim: (sid, folder) => claimSeriesWriter([sid], [folder]) })
         : { removed: 0, bytes: 0, left: [], busy: [] };
+      const cleared = b.data.numbers?.length ? await clearBlockedNumbers(id, b.data.numbers, { userId: userIdOf(req), req }) : [];
       // `found` is what the block made removable, before any purge: with no ids to remove (a Block under "Translated
       // by"), the question the sheet then asks at once.
-      return { ok: purged.left.length === 0 && purged.busy.length === 0, blocked: out.added, found: chapters, ...purged };
+      return { ok: purged.left.length === 0 && purged.busy.length === 0, blocked: out.added, found: chapters, cleared, ...purged };
     } catch (e) {
       if (e instanceof BlockRefused) return reply.code(e.reason === 'not_found' ? 404 : 409).send({ error: e.reason, message: e.message });
       if (e instanceof BlockedPurgeRefused) return reply.code(409).send({ error: e.reason, message: e.message, ...(e.fix ? { fix: e.fix } : {}) });

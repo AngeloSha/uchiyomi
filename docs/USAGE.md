@@ -849,6 +849,11 @@ chapters would go, by number, before anything happens. **Block and remove** bloc
 only, as Block under *Translated by* does, and removes exactly the chapters it showed. If an unblocked group still has
 a chapter, it is not removed, and the button just says **Block**.
 
+It works on a chapter that was never downloaded too: a wrong number the sources list whose download keeps failing,
+because its source is down, say. It is in that row's **⋯** menu, and you can pick it in the select bar. There is no
+file to remove. Once only blocked groups list it, it leaves the series page and Mihon's list, and its failed downloads
+and read marks are cleared. Unblocking the group brings it back as an ordinary chapter.
+
 **In the series' language** (since v0.62.0). A copy known to be in another language than the series' is never
 taken, exactly like a blocked group's: a Spanish copy never fills a chapter of an English series, whichever source
 ranks first. A copy's language is known when its source names it — MangaDex for each chapter, an extension or a site

@@ -872,8 +872,11 @@ groups copied goes once each of them is blocked, never while one unblocked group
 from a chapter: `POST /api/admin/series/:id/block-groups {groups, selected?, bookIds?}` adds the groups to the
 series' own blocked list (un-ranked, patience kept) and re-resolves its listing in one transaction (audited as
 `series.settings`), then removes those of `bookIds` -- this series' only -- still eligible, as the purge does. It
-answers `{ok, blocked, found, removed, bytes, left[], busy[]}`; `found` is `{chapters, series, readers, books[],
-groups[]}` for what the block made removable, plus any of `selected` removable now. `/preview` takes the same body,
+answers `{ok, blocked, found, cleared, removed, bytes, left[], busy[]}`; `found` is `{chapters, series, readers,
+books[], groups[], numbers[]}` for what the block made removable, plus any of `selected` removable now. `numbers`
+are picked chapters not downloaded (a listed number with no file, its download failing): `found.numbers` is those
+every copy of which is then blocked, and the commit clears the ones given -- their `chapter_failures` entry and
+everyone's `listing_progress` mark -- while that still holds, answering them as `cleared`. The listing row stays. `/preview` takes the same body,
 runs the same block rolled back and answers `found`'s shape, each of `groups[]` as `{name, already: series | server
 | null}`. An unknown series is 404; more than 200 blocked groups is 409 `too_many`.
 
@@ -1975,8 +1978,8 @@ GET    /api/admin/series/bulk/chapters/delete
 POST   /api/admin/series/bulk/chapters/delete/cancel
 GET    /api/admin/series/:id/scanlators GET    /api/admin/scanlators
 GET    /api/admin/blocked-chapters POST   /api/admin/blocked-chapters/purge {bookIds}
-POST   /api/admin/series/:id/block-groups/preview {groups, selected?}
-POST   /api/admin/series/:id/block-groups {groups, selected?, bookIds?}
+POST   /api/admin/series/:id/block-groups/preview {groups, selected?, numbers?}
+POST   /api/admin/series/:id/block-groups {groups, selected?, bookIds?, numbers?}
 POST   /api/admin/series/:id/sources DELETE /api/admin/series/:id/sources/:sourceId
 GET    /api/admin/series/:id/sources/:sourceId/leftovers
 POST   /api/admin/series/:id/sources/:sourceId/cleanup {confirmation}

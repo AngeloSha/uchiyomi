@@ -2,7 +2,7 @@
   "_meta": {
     "language": "de",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4819
+    "strings": 4821
   },
   "1 check found something": "1 Prüfung hat etwas gefunden",
   "1 member": "1 Mitglied",
@@ -4821,6 +4821,8 @@
   "Blocked for this series: nothing is fetched from these groups again, and a chapter only they released is hidden.": "Für diese Serie gesperrt: Von diesen Gruppen wird nichts mehr geholt, und ein Kapitel, das nur sie veröffentlicht haben, wird ausgeblendet.",
   "Tick a group to block.": "Hake eine Gruppe zum Sperren an.",
   "Could not check which chapters would go": "Konnte nicht prüfen, welche Kapitel wegfallen würden",
-  "No downloaded chapter is removed: a group that is not blocked still has each of them.": "Kein heruntergeladenes Kapitel wird entfernt: Eine nicht gesperrte Gruppe hat jedes davon noch.",
-  "Block and remove": "Sperren und entfernen"
+  "Block and remove": "Sperren und entfernen",
+  "Hidden, with failed downloads and read marks cleared: 1 chapter not downloaded.": "Ausgeblendet, fehlgeschlagene Downloads und Lesemarken gelöscht: 1 nicht heruntergeladenes Kapitel.",
+  "Hidden, with failed downloads and read marks cleared: {n} chapters not downloaded.": "Ausgeblendet, fehlgeschlagene Downloads und Lesemarken gelöscht: {n} nicht heruntergeladene Kapitel.",
+  "Nothing is removed: a group that is not blocked still has each of these chapters.": "Nichts wird entfernt: Eine nicht gesperrte Gruppe hat jedes dieser Kapitel noch."
 }

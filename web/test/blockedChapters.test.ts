@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { blockedChaptersText, blockedNumbersText, chapterGroups } from '../components/BlockedChapters';
-import { blockRemoveText } from '../components/BlockGroupsDialog';
+import { blockHideText, blockRemoveText } from '../components/BlockGroupsDialog';
 
 const read = (f: string) => readFileSync(join(__dirname, '..', f), 'utf8');
 
@@ -45,9 +45,20 @@ test('Block & remove says what goes before it goes', () => {
   assert.equal(blockRemoveText({ chapters: 1, readers: 0 }), '1 downloaded chapter is then only from blocked groups: removed completely.');
   assert.match(blockRemoveText({ chapters: 2, readers: 3 }), /^2 downloaded chapters .* for 3 readers\.$/);
   const dialog = read('components/BlockGroupsDialog.tsx');
-  assert.match(dialog, /block-groups\/preview`, \{ json: \{ groups: ticked, selected \} \}/, 'the preview is the server\'s, for the ticked groups');
-  assert.match(dialog, /json: \{ groups: ticked, selected, bookIds: preview\.books\.map\(\(b\) => b\.id\) \}/, 'the confirm removes exactly what was shown');
+  assert.match(dialog, /block-groups\/preview`, \{ json: \{ groups: ticked, selected, numbers \} \}/, 'the preview is the server\'s, for the ticked groups');
+  assert.match(dialog, /json: \{ groups: ticked, selected, bookIds: preview\.books\.map\(\(b\) => b\.id\), numbers: hiding \}/, 'the confirm removes exactly what was shown');
   assert.match(dialog, /blockedNumbersText\(preview\.books, false\)/);
+});
+
+test('a chapter never downloaded (its download failing) is asked about by number: hidden, its leftovers cleared', () => {
+  assert.equal(blockHideText(1), 'Hidden, with failed downloads and read marks cleared: 1 chapter not downloaded.');
+  assert.match(blockHideText(3), /: 3 chapters not downloaded\.$/);
+  const dialog = read('components/BlockGroupsDialog.tsx');
+  assert.match(dialog, /chapterGroups\(\[\.\.\.books, \.\.\.ghosts\], copiesOf\)/, 'the ghost\'s own groups are ticked too');
+  const page = read('app/series/page.tsx');
+  assert.match(page, /onBlock=\{isAdmin && r\.ghost\.numberEnd == null \? \(\) => setBlocking\(blockGhosts\(\[r\.ghost\]\)\) : undefined\}/);
+  assert.match(page, /const blockableGhosts = pickedGhostList\.filter\(\(g\) => g\.numberEnd == null\);/);
+  assert.match(page, /books: gs\.filter\(\(g\) => g\.bookId && g\.numberEnd == null\)/, 'a deleted chapter shown as a ghost goes by its id');
 });
 
 test('asked under the Sources sheet\'s group rows and in the Scanlation groups editor, and a block re-counts', () => {
@@ -76,8 +87,8 @@ test('removing is a confirmed step with the ids that were shown, asked inline (a
 
 test('Block & remove is offered from a chapter\'s menu and the select bar, to admins, on files Uchiyomi downloaded', () => {
   const page = read('app/series/page.tsx');
-  assert.match(page, /onBlock=\{isAdmin && b\.owned && b\.numberEnd == null \? \(\) => setBlocking\(\[b\]\) : undefined\}/);
+  assert.match(page, /onBlock=\{isAdmin && b\.owned && b\.numberEnd == null \? \(\) => setBlocking\(\{ books: \[b\], ghosts: \[\] \}\) : undefined\}/);
   assert.match(page, /const blockable = pickedBookList\.filter\(\(b\) => b\.owned && b\.numberEnd == null\);/);
-  assert.match(page, /\{isAdmin && \(\s*<button disabled=\{acting \|\| !blockable\.length\} onClick=\{\(\) => setBlocking\(blockable\)\}/);
-  assert.match(page, /<BlockGroupsDialog seriesId=\{id\} books=\{blocking\}/);
+  assert.match(page, /\{isAdmin && \(\s*<button disabled=\{acting \|\| \(!blockable\.length && !blockableGhosts\.length\)\} data-block-chapters/);
+  assert.match(page, /<BlockGroupsDialog seriesId=\{id\} books=\{blocking\.books\} ghosts=\{blocking\.ghosts\}/);
 });

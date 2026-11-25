@@ -478,3 +478,45 @@ test('Block & remove from a chapter: the preview changes nothing, the block name
     await patchSeries([]).catch(() => {});
   }
 });
+
+test('Block & remove on a chapter never downloaded (its download failing): hidden, its failure and marks cleared', { skip }, async () => {
+  // The rare case: a wrong number is listed, its source is down, so the download keeps failing and nothing is on disk.
+  // There is no file to remove; once only blocked groups list it, it leaves the page, and its leftovers go with it.
+  const listed = async (n: number, groups: string[]) => {
+    const copies = groups.map((g) => copy(n, [g]));
+    await q(`INSERT INTO series_listing (series_id, number, title, scanlator, groups, source_id, chosen, status, copies)
+             VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,'available',$8::jsonb)`,
+      [S, n, `Chapter ${n}`, groups[0], groups, SRC, JSON.stringify({ ...copies[0], number: n }), JSON.stringify(copies)]);
+    await q(`INSERT INTO chapter_failures (series_id, number, source_id, status, reason, attempts) VALUES ($1,$2,$3,'down','source down',4)`, [S, n, SRC]);
+  };
+  const adminId = (await q('SELECT id FROM users WHERE username = $1', [ADMIN]))[0].id;
+  const failures = async () => (await q('SELECT number::float8 AS n FROM chapter_failures WHERE series_id = $1 AND number = ANY($2::real[]) ORDER BY number', [S, [400, 401]])).map((r: any) => r.n);
+  const marks = async () => (await q('SELECT number::float8 AS n FROM listing_progress WHERE series_id = $1 AND number = ANY($2::real[]) ORDER BY number', [S, [400, 401]])).map((r: any) => r.n);
+  const post = (path: string, payload: unknown) => app.inject({ method: 'POST', url: `/api/admin/series/${S}/block-groups${path}`, headers: { authorization: tok }, payload });
+  try {
+    await listed(400, ['Bad']);          // the troll number, listed by Bad alone
+    await listed(401, ['Bad', 'Good']);  // Good lists it too: never cleared
+    await q('INSERT INTO listing_progress (user_id, series_id, number) VALUES ($1,$2,400), ($1,$2,401)', [adminId, S]);
+    assert.ok((await shown()).includes(400), 'PREMISE: the failing chapter is on the page');
+    const p = await post('/preview', { groups: ['Bad'], numbers: [400, 401] });
+    assert.equal(p.statusCode, 200, p.body);
+    assert.deepEqual(p.json().numbers, [400], 'only the number no unblocked group lists');
+    assert.equal(p.json().chapters, 0, 'nothing downloaded to remove');
+    assert.equal((await row(400)).status, 'available', 'the preview blocked nothing');
+    const r = await post('', { groups: ['Bad'], numbers: p.json().numbers });
+    assert.equal(r.statusCode, 200, r.body);
+    assert.deepEqual(r.json().cleared, [400]);
+    assert.ok(!(await shown()).includes(400), 'off the series page');
+    assert.ok(!(await mihon()).includes(400), 'and off Mihon\'s list');
+    assert.deepEqual(await failures(), [401], 'its failure entry is gone, the other kept');
+    assert.deepEqual(await marks(), [401], 'and its read marks');
+    assert.equal((await row(400)).status, 'blocked', 'the listing row stays, for an unblock');
+    // Asked to clear a number an unblocked group lists, nothing happens.
+    assert.deepEqual((await post('', { groups: ['Bad'], numbers: [401] })).json().cleared, []);
+  } finally {
+    await q('DELETE FROM listing_progress WHERE series_id = $1 AND number = ANY($2::real[])', [S, [400, 401]]).catch(() => {});
+    await q('DELETE FROM chapter_failures WHERE series_id = $1 AND number = ANY($2::real[])', [S, [400, 401]]).catch(() => {});
+    await q('DELETE FROM series_listing WHERE series_id = $1 AND number = ANY($2::real[])', [S, [400, 401]]).catch(() => {});
+    await patchSeries([]).catch(() => {});
+  }
+});

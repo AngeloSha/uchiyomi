@@ -25,6 +25,10 @@
 //    unblocked group still lists it (a joint stamp, "A & B", counts only when both are blocked).
 //  - FROM A CHAPTER: blockGroupsFor blocks the groups behind picked chapters for the series and names what that
 //    block leaves to blocked groups alone; its preview is the same transaction, rolled back.
+//  - NOT DOWNLOADED: a picked number with no file -- listed, its download failing (the source down, say) -- has no
+//    file or row to remove. Once every copy of it is blocked it is off the series page and Mihon's list already;
+//    what is left of it is its failure entry and the read marks on its number, and those are cleared too
+//    (blockedNumbersOf / clearBlockedNumbers). The listing row stays, so unblocking makes it a chapter again.
 import type { FastifyRequest } from 'fastify';
 import { q, tx } from './db';
 import { DL_ROOT } from './library';
@@ -32,7 +36,7 @@ import { groupsOf, mergePrefs, normGroup, type StoredPrefs } from './releases';
 import { parseStored, readGlobalPrefs } from './scanlatorPrefs';
 import { reapplyBlocklistInTransaction } from './seriesListing';
 import { purgeBooks, purgeRefusal, type LeftoverBook, type PurgeResult } from './sourceLeftovers';
-import { heldBy } from './chapterRanges';
+import { heldBy, holds } from './chapterRanges';
 import { numKey } from './postingOrder';
 
 type Query = typeof q;
@@ -136,6 +140,49 @@ export interface BlockOutcome extends BlockedChapters {
   groups: BlockGroup[];
   /** The ones the block adds to the series' own list (the rest were blocked already). */
   added: string[];
+  /** Of the picked numbers not downloaded, those every copy of which is then blocked: hidden, and cleared. */
+  numbers: number[];
+}
+
+/**
+ * Of `numbers`, those of a series listed with every copy blocked and held by no row here (a file, a deleted
+ * chapter's tombstone or a range): a chapter that was never downloaded, only blocked groups' now. Sorted.
+ */
+export async function blockedNumbersOf(seriesId: string, numbers: readonly number[], query: Query = q): Promise<number[]> {
+  const asked = [...new Set(numbers.filter((n) => Number.isFinite(n)))];
+  if (!asked.length) return [];
+  const rows = await query<{ number: number }>(
+    `SELECT l.number::float8 AS number FROM series_listing l
+      WHERE l.series_id = $1 AND l.number = ANY($2::real[]) AND l.status = 'blocked'
+        AND NOT EXISTS (SELECT 1 FROM lib_books b LEFT JOIN book_overrides ov ON ov.book_id = b.id
+                         WHERE b.series_id = l.series_id AND ${holds('b', 'ov', 'l.number')})
+      ORDER BY l.number`, [seriesId, asked]);
+  return rows.map((r) => Number(r.number));
+}
+
+/**
+ * Clear what is left of not-downloaded chapters only blocked groups list (see the header): of `numbers`, those still
+ * eligible under the series row lock and its listing's, lose their failure entry and every reader's mark. Audited as
+ * `series.blocked_purge` with `cleared`. Answers the numbers cleared.
+ */
+export async function clearBlockedNumbers(
+  seriesId: string, numbers: readonly number[], o: { userId: string | null; req?: FastifyRequest },
+): Promise<number[]> {
+  if (!numbers.length) return [];
+  return tx(async (qq) => {
+    const [locked] = await qq<{ title: string }>('SELECT title FROM lib_series WHERE id = $1 FOR UPDATE', [seriesId]);
+    if (!locked) return [];
+    await qq('SELECT number FROM series_listing WHERE series_id = $1 FOR UPDATE', [seriesId]);
+    const eligible = await blockedNumbersOf(seriesId, numbers, qq);
+    if (!eligible.length) return [];
+    const { numbers: gone } = await purgeBooks(seriesId, [], eligible, qq);
+    await qq('INSERT INTO audit_log (user_id, event, detail, ip, user_agent) VALUES ($1,$2,$3,$4,$5)', [
+      o.userId, 'series.blocked_purge',
+      JSON.stringify({ id: seriesId, title: locked.title, removed: 0, cleared: gone.slice(0, 50) }),
+      o.req?.ip?.slice(0, 64) ?? null, String(o.req?.headers['user-agent'] ?? '').slice(0, 200) || null,
+    ]);
+    return gone;
+  });
 }
 
 export class BlockRefused extends Error {
@@ -158,10 +205,12 @@ const MAX_BLOCKED = 200; // prefsSchema's ceiling (lib/scanlatorPrefs.ts)
  * blocked earlier and kept is offered again when it is the one asked about; chapters removable before for other
  * reasons stay with the standing question. `commit: false` is the preview: the same steps, rolled back, so the
  * answer is the release rules' own and not a second reading of them. Nothing is removed here: the caller purges the
- * ids it showed through purgeBlockedChapters, which re-checks each.
+ * ids it showed through purgeBlockedChapters, which re-checks each. `numbers` are picked chapters not downloaded:
+ * `numbers` in the answer is those of them the block leaves to blocked groups alone (clearBlockedNumbers clears them).
  */
 export async function blockGroupsFor(
-  seriesId: string, names: readonly string[], o: { selected?: readonly string[]; commit: boolean },
+  seriesId: string, names: readonly string[],
+  o: { selected?: readonly string[]; numbers?: readonly number[]; commit: boolean },
 ): Promise<BlockOutcome> {
   const global = await readGlobalPrefs();
   const serverKeys = new Set(global.blocked.map(normGroup).filter(Boolean));
@@ -200,7 +249,7 @@ export async function blockGroupsFor(
     }
     const after = await blockedChaptersOf(seriesId, qq);
     const books = after.books.filter((b) => !before.has(b.id) || selected.has(b.id));
-    const out: BlockOutcome = { ...(await summed(books, qq)), groups, added };
+    const out: BlockOutcome = { ...(await summed(books, qq)), groups, added, numbers: await blockedNumbersOf(seriesId, o.numbers ?? [], qq) };
     if (!o.commit) throw new Rollback(out);
     return out;
   };

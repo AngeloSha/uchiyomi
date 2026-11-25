@@ -138,10 +138,21 @@ components:
           type: array
           maxItems: 5000
           items: { type: string, minLength: 1, maxLength: 128 }
+        numbers:
+          description: >-
+            Picked chapters not downloaded (a listed number with no file, its download failing). Preview -- asked about;
+            commit -- the ones shown, whose failure entry and read marks are cleared while every copy is blocked.
+          type: array
+          maxItems: 5000
+          items: { type: number, minimum: 0, maximum: 1000000 }
     BlockGroupsPreview:
       type: object
-      required: [chapters, series, readers, books, groups]
+      required: [chapters, series, readers, books, groups, numbers]
       properties:
+        numbers:
+          description: Of the numbers asked about, those every copy of which is then blocked and that no file holds.
+          type: array
+          items: { type: number }
         chapters: { type: integer }
         series: { type: integer }
         readers: { type: integer }
@@ -10839,9 +10850,10 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [ok, blocked, found, removed, bytes, left, busy]
+                required: [ok, blocked, found, cleared, removed, bytes, left, busy]
                 properties:
                   ok: { type: boolean }
+                  cleared: { type: array, items: { type: number }, description: The not-downloaded numbers cleared. }
                   blocked: { type: array, items: { type: string } }
                   found: { $ref: "#/components/schemas/BlockGroupsPreview" }
                   removed: { type: integer }
