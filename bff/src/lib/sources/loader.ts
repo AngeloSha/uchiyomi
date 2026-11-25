@@ -6,13 +6,24 @@ import { readdirSync } from 'fs';
 import { join } from 'path';
 import { UNNUMBERED, unnumberedOf, type SourceAdapter, type SourceChapter, type SourceHost } from './types';
 import { cfGet, cfPost, cfSession } from './flaresolverr';
+import { ProxyAgent, fetch as undiciFetch } from 'undici';
 import { learnImageHosts } from './imageHosts';
 
 const registry = new Map<string, SourceAdapter>();
 /** The ids a source pack in SOURCES_DIR registered (v0.54.0): what the sources overview calls a pack's source. */
 const fromPack = new Set<string>();
 // host services injected into a plugin's register(host) so plugins never import core internals by path.
-const host: SourceHost = { cfGet, cfPost, cfSession };
+// One ProxyAgent per proxy URL, so a pack that fetches per request does not build a new connection pool each time.
+const proxyAgents = new Map<string, ProxyAgent>();
+const agentFor = (proxy: string) => {
+  let agent = proxyAgents.get(proxy);
+  if (!agent) { agent = new ProxyAgent(proxy); proxyAgents.set(proxy, agent); }
+  return agent;
+};
+const host: SourceHost = {
+  cfGet, cfPost, cfSession,
+  proxyFetch: (proxy, url, init) => undiciFetch(url, { ...(init as any), dispatcher: agentFor(proxy) }),
+};
 
 function isAdapter(x: any): x is SourceAdapter {
   return !!x && typeof x.id === 'string' && typeof x.name === 'string' &&
