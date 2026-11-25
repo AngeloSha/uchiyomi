@@ -8,6 +8,7 @@ import { z } from 'zod';
 import { q, one, tx } from '../lib/db';
 import { postingOrderSeries, POSTING_ORDER_REFUSAL } from '../lib/numbering';
 import numberingRoutes from './numbering';
+import sourceSettingsRoutes from './sourceSettings';
 import { lastNumber } from '../lib/chapterRanges';
 import findSourcesRoutes from './findSources';
 import autoHeroRoutes from './autoHero';
@@ -655,6 +656,8 @@ export default async function adminRoutes(app: FastifyInstance) {
   app.addHook('preSerialization',privateAdminResponse);
   // #116's extension settings and numbering routes: a child of this plugin, so the two hooks above gate them.
   await app.register(numberingRoutes);
+  // A source pack's declared settings, saved by the server (routes/sourceSettings.ts).
+  await app.register(sourceSettingsRoutes);
   // v0.49.1: a series' other names and Find other sources, the same way (routes/findSources.ts).
   await app.register(findSourcesRoutes);
   // v0.51.0: a new automatic banner for a series, the same way (routes/autoHero.ts).

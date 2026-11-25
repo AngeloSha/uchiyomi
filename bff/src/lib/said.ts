@@ -623,6 +623,14 @@ const EN = {
   'pref.text': ({ label }: { label: string }) => `${label} takes text.`,
   'pref.tooLong': ({ label }: { label: string }) => `${label} is too long.`,
 
+  // ---- A source pack's settings refused (lib/sources/preferences.ts): the same words, about a source.
+  'setting.unknown': () => 'This source has no such setting any more. Reopen its settings.',
+  'setting.onOff': ({ label }: { label: string }) => `${label} takes on or off.`,
+  'setting.noChoice': ({ label, value }: { label: string; value: string }) => `${label} has no choice "${value}".`,
+  'setting.choices': ({ label }: { label: string }) => `${label} takes a list of its choices.`,
+  'setting.text': ({ label }: { label: string }) => `${label} takes text.`,
+  'setting.tooLong': ({ label }: { label: string }) => `${label} is too long.`,
+
   // ---- A follow refused for its language (v0.52.0, #123: routes/admin.ts, the manual follow's backstop). `theirs`
   // and `ours` are language codes: the English names them in English, the web in the reader's language.
   'follow.languageDiffers': ({ theirs, ours }: { theirs: string; ours: string }) =>

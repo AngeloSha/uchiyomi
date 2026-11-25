@@ -7,12 +7,22 @@ import { join } from 'path';
 import { UNNUMBERED, unnumberedOf, type SourceAdapter, type SourceChapter, type SourceHost } from './types';
 import { cfGet, cfPost, cfSession } from './flaresolverr';
 import { learnImageHosts } from './imageHosts';
+import { validatePreferences } from './preferences';
+import { readSourceSettings } from '../sourceSettings';
 
 const registry = new Map<string, SourceAdapter>();
 /** The ids a source pack in SOURCES_DIR registered (v0.54.0): what the sources overview calls a pack's source. */
 const fromPack = new Set<string>();
 // host services injected into a plugin's register(host) so plugins never import core internals by path.
-const host: SourceHost = { cfGet, cfPost, cfSession };
+const host: SourceHost = {
+  cfGet, cfPost, cfSession,
+  // Only the values saved in Admin → Sources, for the settings the adapter declared: a key never saved is absent,
+  // so a pack's own environment/file fallback still applies. Read per call; no reload after a settings change.
+  settings: async (id) => {
+    const { values } = await readSourceSettings(id, registry.get(id)?.preferences ?? []);
+    return Object.fromEntries(values);
+  },
+};
 
 function isAdapter(x: any): x is SourceAdapter {
   return !!x && typeof x.id === 'string' && typeof x.name === 'string' &&
@@ -58,6 +68,15 @@ export function registerAdapter(a: SourceAdapter): boolean {
   // loses the numbers the library cannot file.
   learnImageHosts(a);
   fileableOnly(a);
+  // A pack's settings screen: one bad declaration is dropped, never the source (preferences.ts).
+  if (a.preferences !== undefined) {
+    const declared = Array.isArray(a.preferences) ? a.preferences : [];
+    const clean = validatePreferences(declared);
+    if (clean.length !== declared.length) {
+      console.warn(`[sources] ${a.id}: ignored ${declared.length - clean.length} invalid setting declaration(s)`);
+    }
+    try { a.preferences = clean; } catch { /* a frozen adapter keeps its own declarations */ }
+  }
   registry.set(a.id, a);
   return true;
 }

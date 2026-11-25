@@ -3092,6 +3092,22 @@ is how many -- and each then waits for an admin to confirm its renaming below. A
 length only:
 extensions keep logins and keys in them.
 
+**A source pack's settings.** A separately built source pack can declare `preferences` on its adapter; those
+appear under **Admin → Sources → (source) → Settings** and are stored by Uchiyomi, because a pack has no engine
+screen. `GET /api/admin/sources/:id/preferences` answers `{ source { id, name, lang, pkgName: null, extensionName:
+null }, siblings: [], preferences, usedBy, renumbers }`; every pack answers with a server-owned
+`autoUpdate` switch first (the nightly sweep asks the source only while it is on; `POST`/`DELETE` with that key
+change it, audited as `source.auto_update` / `source.auto_update_reset`), then its declared preferences. Each
+preference is the extension shape plus `secret`, `set` and `unreadable`. A `secret` value is never returned (`value: null`, `set: true`); `unreadable` says the
+stored value could not be decrypted, and the admin is asked to enter it again. `POST` with `{ key, value }` is
+validated against the descriptor, not a generic union: booleans, strings up to 4096 characters, and up to 200
+choices of 512 characters, **400** `unknown_pref` or `bad_value` with `messageSaid` (`setting.*`).
+`DELETE /api/admin/sources/:id/preferences/:key` clears one value, after which the pack falls back to its
+environment, `.uchi.env` or in-file constant. A changed value clears the source's detail cache; a descriptor
+marked `numbering` queues a remap exactly as an extension's does, and `remap` says how many series. Writes are
+audited as `source.pack_pref` and resets as `source.pack_pref_reset`, with text and secret values by length only.
+An `sw:` id is refused: extensions keep the route above.
+
 **Chapter numbering (v0.49.0, #116).** A source that gives many different posts one chapter number (Webtoons:
 Istrevelia's 226 posts on 13 numbers) is numbered by posting order, 1..K. `GET /api/sources/detail` answers
 `numbering` { verdict (strong, hint, none), applied, ordered, posts, numbers, biggest, examples, alt { count,

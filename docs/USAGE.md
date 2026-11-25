@@ -2304,7 +2304,9 @@ cooldown (if a site rate-limited you after heavy downloading); **Turn off** or *
 series use it (they get no new chapters from it until you turn it back on; nothing is deleted); and **Remove** for a
 site you added, refused while it is still some series' main source (replace it first). **Used by 195 series ›**
 opens the Library filtered to them. Then what its kind has: an extension's languages, settings, **Update** and
-**Remove extension**; MangaDex's languages; a site's address, with **Update address**, and its **Language**.
+**Remove extension**; MangaDex's languages; a site's address, with **Update address**, and its **Language**; a
+source pack's **Settings**, for the options the pack declares (a value saved there wins; **Reset** returns the field
+to the pack's own environment or `.uchi.env`).
 
 An extension's source in every language reads *All languages, mixed* (it read *Multiple languages*, and in
 **Languages** *All languages*, which looked like a switch for all of them): it lists the chapters of every language

@@ -261,6 +261,17 @@ plugin and hit **Admin → Sources → Add sources → Reload sources** (`POST /
 With no sites added, no extensions installed and no pack mounted, Uchiyomi is just a clean reader for the library
 you already own.
 
+Every loaded pack also has a server-owned **Auto Update?** switch in the same place: off means the nightly
+sweep leaves it alone (a manual Check still asks it), and it applies even to a pack that declares no
+preferences. A plugin can declare `preferences` on its adapter (switch, checkbox, list, multiselect or text).
+Once the pack is loaded, they appear under **Admin → Sources → (source) → Settings**, and are stored in the
+database by the server; changing a value needs no reload. A value
+set there wins; an unset one falls back to the plugin's own configuration (environment, `.uchi.env` or an in-file
+constant), so existing deployments keep working. Text values may be marked `secret`, in which case they are
+encrypted under a key derived from `JWT_SECRET` and never returned to the browser. **Reset** clears the stored
+value and returns the field to the plugin's fallback. See
+[docs/sourcepack-settings.md](sourcepack-settings.md) for the descriptor and the fallback order.
+
 **Progressive search.** A cross-source Discover search returns after `SEARCH_FIRST_ANSWER_MS` (default
 `6000`) at the latest, or `SEARCH_GRACE_MS` (`1500`) after its first useful answer, while unfinished sources
 keep filling the same cached entry. `SEARCH_SOURCE_MS` (`20000`, plus the solver allowance when needed) is

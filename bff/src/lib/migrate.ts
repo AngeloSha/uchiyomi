@@ -496,6 +496,7 @@ CREATE TABLE IF NOT EXISTS source_health (
   last_ok_at    timestamptz,
   blocked_until timestamptz,
   disabled      boolean NOT NULL DEFAULT false,
+  auto_update   boolean NOT NULL DEFAULT true,
   updated_at    timestamptz NOT NULL DEFAULT now()
 );
 
@@ -515,6 +516,9 @@ ALTER TABLE source_health ADD COLUMN IF NOT EXISTS check_code text;
 -- backoff then stops it being asked at all and a perfectly working source disappears.
 ALTER TABLE source_health ADD COLUMN IF NOT EXISTS slow_streak  int NOT NULL DEFAULT 0;
 ALTER TABLE source_health ADD COLUMN IF NOT EXISTS last_slow_at timestamptz;
+-- The nightly sweep asks this source only while this is true. Server-owned, not a pack setting: it applies to
+-- every pack, including the ones that declare no preferences at all.
+ALTER TABLE source_health ADD COLUMN IF NOT EXISTS auto_update boolean NOT NULL DEFAULT true;
 
 -- One row per chapter the updater or a fill could not save, bumped on every further attempt and deleted by
 -- persistScan the moment the chapter appears. Per CHAPTER, not per attempt: the question it answers is
@@ -996,6 +1000,17 @@ CREATE TABLE IF NOT EXISTS source_page_rules (
   skip_gif boolean NOT NULL,
   updated_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (source_id, series_scope)
+);
+
+-- A source pack's declared settings, saved by the server because a pack has no engine and its files are mounted
+-- read-only (lib/sourceSettings.ts). Absent means "not set here": the pack falls back to its own environment/file
+-- configuration. The value column holds the JSON value, or the sealed text for a setting declared secret.
+CREATE TABLE IF NOT EXISTS source_settings (
+  source_id text NOT NULL,
+  key text NOT NULL,
+  value jsonb NOT NULL,
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (source_id, key)
 );
 
 -- Bulk import (backup / MangaDex list / pasted titles) → match review → add. Unlike importJob/artJob/

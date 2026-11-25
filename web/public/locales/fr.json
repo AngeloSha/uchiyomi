@@ -2,7 +2,7 @@
   "_meta": {
     "language": "fr",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4808
+    "strings": 4814
   },
   "1 check found something": "1 vérification a trouvé quelque chose",
   "1 member": "1 membre",
@@ -4811,5 +4811,11 @@
   "Some chapters could not be removed now. Try again in a moment.": "Certains chapitres n’ont pas pu être supprimés pour l’instant. Réessayez dans un instant.",
   "Could not remove the chapters": "Impossible de supprimer les chapitres",
   "Remove blocked chapters": "Supprimer les chapitres bloqués",
-  "Remove completely": "Supprimer complètement"
+  "Remove completely": "Supprimer complètement",
+  "This source has no such setting any more. Reopen its settings.": "Cette source n’a plus ce réglage. Rouvrez ses réglages.",
+  "This source has no settings.": "Cette source n’a aucun réglage.",
+  "These settings belong to this source. A setting left unset falls back to the pack’s own configuration.": "Ces réglages appartiennent à cette source. Un réglage non défini revient à la configuration propre du pack.",
+  "Stored. Enter a new value to replace it.": "Enregistré. Saisissez une nouvelle valeur pour le remplacer.",
+  "The stored value could not be read. Enter it again.": "La valeur enregistrée n’a pas pu être lue. Saisissez-la à nouveau.",
+  "Could not load these settings.": "Impossible de charger ces réglages."
 }

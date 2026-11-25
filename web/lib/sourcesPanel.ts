@@ -37,6 +37,8 @@ export interface OverviewSource {
   lang: string | null;
   /** An extension source's package. */
   pkgName?: string | null;
+  /** A source pack that declares settings: its sheet offers them. */
+  settings?: boolean;
   standing: SourceStanding;
   /** Who switched it off: an admin (here or in Health), its extension's switch, or a hidden language. */
   offBy?: 'admin' | 'extension' | 'language' | null;

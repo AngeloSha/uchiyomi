@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ar",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4808
+    "strings": 4814
   },
   "1 check found something": "فحص واحد وجد شيئًا",
   "1 member": "عضو واحد",
@@ -4811,5 +4811,11 @@
   "Some chapters could not be removed now. Try again in a moment.": "تعذّرت إزالة بعض الفصول الآن. حاول مرة أخرى بعد قليل.",
   "Could not remove the chapters": "تعذّرت إزالة الفصول",
   "Remove blocked chapters": "إزالة الفصول المحظورة",
-  "Remove completely": "إزالة تامة"
+  "Remove completely": "إزالة تامة",
+  "This source has no such setting any more. Reopen its settings.": "لم يعد لهذا المصدر إعداد كهذا. أعد فتح إعداداته.",
+  "This source has no settings.": "لا توجد إعدادات لهذا المصدر.",
+  "These settings belong to this source. A setting left unset falls back to the pack’s own configuration.": "هذه الإعدادات تخص هذا المصدر. الإعداد غير المضبوط يعود إلى إعدادات الحزمة نفسها.",
+  "Stored. Enter a new value to replace it.": "محفوظ. أدخل قيمة جديدة لاستبداله.",
+  "The stored value could not be read. Enter it again.": "تعذّرت قراءة القيمة المحفوظة. أدخلها مرة أخرى.",
+  "Could not load these settings.": "تعذّر تحميل هذه الإعدادات."
 }

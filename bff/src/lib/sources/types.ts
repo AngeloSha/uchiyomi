@@ -102,6 +102,32 @@ export const unnumberedOf = (list: unknown): number => {
 
 export type CreatorField = 'author' | 'artist';
 
+/** The five kinds of source setting, drawn like an extension's (components/ExtensionSettings.tsx). */
+export type PrefType = 'switch' | 'checkbox' | 'list' | 'multiselect' | 'text';
+export type PrefValue = boolean | string | string[];
+
+/**
+ * A setting a source pack declares, so Admin → Sources can offer it and the server can store it.
+ *
+ * A pack has no engine to keep its preference screen. It declares the screen here; the server keeps the values
+ * (lib/sourceSettings.ts) and hands them back through `SourceHost.settings(id)` -- sparse, only what was stored,
+ * so the pack can keep its own fallback chain (`stored ?? env ?? file ?? constant`).
+ */
+export interface SourcePreference {
+  key: string;
+  type: PrefType;
+  title: string;
+  summary?: string;
+  default?: PrefValue;
+  /** A list or multi-select's labels, in the same order as `entryValues`. */
+  entries?: string[];
+  entryValues?: string[];
+  /** Changing it changes the chapter numbers the source gives: the sheet warns and the route queues a remap. */
+  numbering?: boolean;
+  /** Text only: stored sealed (lib/secretbox.ts) and never read back to a browser. */
+  secret?: boolean;
+}
+
 export interface SourceAdapter {
   id: string; // 'mangadex'
   name: string; // 'MangaDex'
@@ -224,6 +250,8 @@ export interface SourceAdapter {
    * that name a chapter's source still can. Set by registration (suwayomi/register.ts), never by an adapter.
    */
   backup?: boolean;
+  /** Optional settings screen (see SourcePreference): absent means a source with none. */
+  preferences?: readonly SourcePreference[];
 }
 
 /** Host services the core injects into a source plugin's register(host) (so plugins never import core internals). */
@@ -231,6 +259,11 @@ export interface SourceHost {
   cfGet(url: string): Promise<string>;
   cfPost(url: string, postData: string): Promise<string>;
   cfSession(url: string): Promise<{ cookie: string; userAgent: string }>;
+  /**
+   * The values stored for this source from the WebUI, and nothing else: a key never saved is absent, so the pack's
+   * own environment/file fallback still applies. Called per request; no reload is needed after a settings change.
+   */
+  settings(id: string): Promise<Record<string, PrefValue>>;
 }
 
 /** A creator method may implement only the fields the extension actually declares. */
