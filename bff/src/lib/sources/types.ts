@@ -231,6 +231,12 @@ export interface SourceHost {
   cfGet(url: string): Promise<string>;
   cfPost(url: string, postData: string): Promise<string>;
   cfSession(url: string): Promise<{ cookie: string; userAgent: string }>;
+  /**
+   * Fetch through an HTTP CONNECT proxy (undici ProxyAgent), for a source that must leave through a chosen
+   * egress IP. `proxy` is a full proxy URL including credentials when the proxy needs them; the pack never
+   * sees the agent or the core's undici import.
+   */
+  proxyFetch(proxy: string, url: string, init?: Parameters<typeof fetch>[1]): ReturnType<typeof fetch>;
 }
 
 /** A creator method may implement only the fields the extension actually declares. */
